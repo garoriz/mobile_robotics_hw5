@@ -12,3 +12,6 @@ ev3 = EV3Brick()
 
 X = 23
 Y = 19
+
+start_X = 0
+start_Y = 0
