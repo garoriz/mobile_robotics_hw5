@@ -11,13 +11,18 @@ import math
 # Create your objects here.
 ev3 = EV3Brick()
 
-# Добавлено: моторы и навигация к цели
 left_motor = Motor(Port.B)
 right_motor = Motor(Port.C)
 
+X = 25
+Y = 25
+
+start_X = 0
+start_Y = 0
+
 # Укажите реальные размеры ваших колёс/шасси (мм)
-WHEEL_DIAMETER_MM = 56    # мм
-AXLE_TRACK_MM = 115       # мм (расстояние между центрами колёс)
+WHEEL_DIAMETER_MM = 55.5    # мм
+AXLE_TRACK_MM = 175       # мм (расстояние между центрами колёс)
 
 drive = DriveBase(left_motor, right_motor, wheel_diameter=WHEEL_DIAMETER_MM, axle_track=AXLE_TRACK_MM)
 drive.settings(straight_speed=150, straight_acceleration=300, turn_rate=200, turn_acceleration=400)
@@ -28,8 +33,8 @@ def navigate_to_goal(Xg_cm, Yg_cm, X0_cm, Y0_cm):
     dy_mm = (Yg_cm - Y0_cm) * 10.0
 
     # расстояние и угол до цели (в градусах)
-    distance_mm = math.hypot(dx_mm, dy_mm)
-    angle_deg = math.degrees(math.atan2(dy_mm, dx_mm))
+    distance_mm = (dx_mm**2 + dy_mm**2)**0.5
+    angle_deg = -math.degrees(math.atan2(dy_mm, dx_mm))
 
     # Поворот к целевому углу (предполагается начальный heading = 0 по +X)
     ev3.screen.clear()
@@ -44,6 +49,12 @@ def navigate_to_goal(Xg_cm, Yg_cm, X0_cm, Y0_cm):
     wait(200)
 
     ev3.speaker.beep()
+
+ev3.screen.print("Press center")
+ev3.screen.print("button to start")
+
+while Button.CENTER not in ev3.buttons.pressed():
+    wait(10)
 
 # Вызов навигации
 navigate_to_goal(X, Y, start_X, start_Y)
