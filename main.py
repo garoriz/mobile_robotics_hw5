@@ -13,10 +13,11 @@ ev3 = EV3Brick()
 
 left_motor = Motor(Port.B)
 right_motor = Motor(Port.C)
+ultra_motor = Motor(Port.A)
 ultra = UltrasonicSensor(Port.S4)
 
-X = 25
-Y = 25
+X = 50
+Y = 50
 
 start_X = 0
 start_Y = 0
@@ -28,13 +29,14 @@ AXLE_TRACK_MM = 175       # мм (расстояние между центрам
 drive = DriveBase(left_motor, right_motor, wheel_diameter=WHEEL_DIAMETER_MM, axle_track=AXLE_TRACK_MM)
 drive.settings(straight_speed=150, straight_acceleration=300, turn_rate=200, turn_acceleration=400)
 
-FORWARD_SPEED = 120            # mm/s при движении к цели
-WALL_FOLLOW_SPEED = 80         # mm/s при следовании стене
+FORWARD_SPEED = 60            # mm/s при движении к цели
+WALL_FOLLOW_SPEED = 40         # mm/s при следовании стене
 OBSTACLE_DIST_MM = 150         # порог обнаружения препятствия (мм)
 WALL_TARGET_MM = 80            # желаемая дистанция до стены при следовании (мм)
 MLINE_TOLERANCE_MM = 40        # допуска вхождения в M-line (мм)
 GOAL_TOLERANCE_MM = 60         # расстояние до цели, считаем достигнутым (мм)
-KP_TURN = 3.0
+KP_TURN = 0.4
+MAX_TURN = 80
 
 wheel_circ_mm = math.pi * WHEEL_DIAMETER_MM
 deg_to_mm = wheel_circ_mm / 360.0
@@ -99,6 +101,12 @@ def project_to_mline(pos, start, goal):
     proj_y = start[1] + t * gy
     return t, (proj_x, proj_y)
 
+def turn_ultra_left():
+    ultra_motor.run_target(120, -90)
+
+def turn_ultra_front():
+    ultra_motor.run_target(120, 0)
+
 def bug2_go_to_goal(goal_x_cm, goal_y_cm, start_x_cm, start_y_cm):
     # перевод в мм
     start_mm = (start_x_cm*10.0, start_y_cm*10.0)
@@ -119,10 +127,6 @@ def bug2_go_to_goal(goal_x_cm, goal_y_cm, start_x_cm, start_y_cm):
     hit_proj_goal_dist = None   # d(Hi_proj, T)
     wall_follow_start_time = None
     WALL_LOOP_DETECT_DIST = 60  # mm: если вернулись к Hi ближе этой дистанции -> замкнутый обход
-
-    ev3.screen.clear()
-    ev3.screen.print("Bug2 start")
-    ev3.speaker.beep()
 
     # Вспомогательные локальные функции
     def at_goal(pos):
@@ -155,9 +159,6 @@ def bug2_go_to_goal(goal_x_cm, goal_y_cm, start_x_cm, start_y_cm):
 
         # 1) проверка цели в любом состоянии
         if at_goal(pos):
-            ev3.screen.clear()
-            ev3.screen.print("Goal reached")
-            ev3.speaker.beep(1000,200)
             return True
 
         # чтение ультразвука
@@ -182,7 +183,7 @@ def bug2_go_to_goal(goal_x_cm, goal_y_cm, start_x_cm, start_y_cm):
                 wait(150)
                 # начнём следовать границе вправо: делаем плавный разворот вправо чтобы прижаться к стене
                 # небольшой шаг назад, затем поворот вправо ~30deg чтобы начало обхода было стабильным
-                drive.drive(WALL_FOLLOW_SPEED, 120)  # краткий манёвр
+                drive.drive(WALL_FOLLOW_SPEED, 90)  # краткий манёвр
                 wait(250)
                 continue
 
@@ -190,13 +191,16 @@ def bug2_go_to_goal(goal_x_cm, goal_y_cm, start_x_cm, start_y_cm):
             # Скорость по прямой; корректируем heading к mline_angle_deg если сильно ушли
             heading_err = normalize_angle_deg(mline_angle_deg - theta)
             turn_rate = KP_TURN * heading_err
-            if turn_rate > 200: turn_rate = 200
-            if turn_rate < -200: turn_rate = -200
-            drive.drive(FORWARD_SPEED, turn_rate)
+            if turn_rate > MAX_TURN: turn_rate = MAX_TURN
+            if turn_rate < -MAX_TURN: turn_rate = -MAX_TURN
+            ev3.screen.clear()
+            ev3.screen.print(str(normalize_angle_deg(-mline_angle_deg - theta)))
+            drive.drive(FORWARD_SPEED, 0)
 
         else:  # STATE_FOLLOW_WALL
             # Простое правое следование стене: поддерживаем расстояние WALL_TARGET_MM
             # Если ультразвук смотрит вперёд, то используем его как боковой измеритель: простая P-структура
+            turn_ultra_left()
             error = obs_dist - WALL_TARGET_MM
             Kp_wall = 1.6
             turn_rate_wall = -Kp_wall * error
@@ -207,9 +211,6 @@ def bug2_go_to_goal(goal_x_cm, goal_y_cm, start_x_cm, start_y_cm):
             # 2a) Если на ходу дошли до цели
             if at_goal(pos):
                 drive.stop()
-                ev3.screen.clear()
-                ev3.screen.print("Goal reached")
-                ev3.speaker.beep(1000,200)
                 return True
 
             # 2b) Проверка встречи M-line в точке Q с условием d(Q,T) < d(Hi,T) и линия из Q к T свободна
@@ -217,6 +218,7 @@ def bug2_go_to_goal(goal_x_cm, goal_y_cm, start_x_cm, start_y_cm):
             if on_mline and (0.0 <= t_now <= 1.0):
                 proj_now_goal_dist = dist(proj_now, goal_mm)
                 # убедиться, что проекция ближе к цели, чем проекция Hi и впереди нет препятствия
+                turn_ultra_front()
                 try:
                     front_clear = ultra.distance() > OBSTACLE_DIST_MM
                 except Exception:
@@ -226,29 +228,16 @@ def bug2_go_to_goal(goal_x_cm, goal_y_cm, start_x_cm, start_y_cm):
                     # переходим в GO_TO_GOAL, перед этим повернёмся к M-line
                     state = STATE_GO_TO_GOAL
                     drive.stop()
-                    ev3.screen.clear()
-                    ev3.screen.print("Leave wall-follow")
                     wait(120)
                     # поворот к направлению M-line
-                    drive.turn(mline_angle_deg - theta)
+                    drive.turn(-mline_angle_deg - theta)
                     wait(50)
                     continue
-
-            # 2c) проверка возвращения к Hi (замкнутый обход) -> цель недостижима
-            if hit_point is not None and dist(pos, hit_point) <= WALL_LOOP_DETECT_DIST and wall_follow_start_time is not None and wall_follow_start_time.time() > 800:
-                drive.stop()
-                ev3.screen.clear()
-                ev3.screen.print("Trapped: cannot reach")
-                ev3.speaker.beep(300,600)
-                return False
 
         wait(60)
 
     # safety fallback
     drive.stop()
-    ev3.screen.clear()
-    ev3.screen.print("Timeout")
-    ev3.speaker.beep(300,200)
     return False
 
 ev3.screen.clear()
